@@ -1,3 +1,10 @@
+"""
+CT重建核心算法模块。
+
+实现投影预处理和FDK锥束CT重建算法。支持暗场/亮场校正、
+旋转中心偏移校正、探测器偏转校正等图像预处理功能。
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,15 +16,35 @@ from .config import ReconstructionConfig
 from .io_utils import load_optional_calibration, load_projection_stack, save_png_stack
 
 
+# 进度回调函数类型定义
 ProgressCallback = Callable[[str], None]
 
 
 def _log(callback: ProgressCallback | None, message: str) -> None:
+    """
+    输出日志信息。
+
+    Args:
+        callback: 进度回调函数。为None时不输出。
+        message: 日志信息。
+    """
     if callback:
         callback(message)
 
 
 def _shift_columns(image: np.ndarray, offset_px: float) -> np.ndarray:
+    """
+    通过插值平移图像的列（横向平移）。
+
+    用于旋转中心偏移校正。
+
+    Args:
+        image: 输入图像，形状为(height, width)。
+        offset_px: 平移量（像素）。正值向右平移，负值向左平移。
+
+    Returns:
+        np.ndarray: 平移后的图像，同样形状为(height, width)。
+    """
     if abs(offset_px) < 1e-6:
         return image
     x = np.arange(image.shape[1], dtype=np.float32)
@@ -26,6 +53,22 @@ def _shift_columns(image: np.ndarray, offset_px: float) -> np.ndarray:
 
 
 def _apply_detector_roll(projections: np.ndarray, roll_deg: float, callback: ProgressCallback | None) -> np.ndarray:
+    """
+    应用探测器面内偏转校正。
+
+    用于校正探测器绕光轴旋转的偏转。
+
+    Args:
+        projections: 投影图像栈，形状为(num_projections, height, width)。
+        roll_deg: 偏转角度（度）。
+        callback: 进度回调函数。
+
+    Returns:
+        np.ndarray: 校正后的投影栈，float32类型。
+
+    Notes:
+        若scipy不可用，跳过校正并发出警告。
+    """
     if abs(roll_deg) < 1e-6:
         return projections
     try:
@@ -48,6 +91,25 @@ def preprocess_projections(
     config: ReconstructionConfig,
     callback: ProgressCallback | None = None,
 ) -> np.ndarray:
+    """
+    投影图像预处理。
+
+    包括暗场/亮场校正、对数变换、旋转中心偏移校正、
+    探测器面内偏转校正等步骤。
+
+    Args:
+        projections: 原始投影图像栈，形状为(num_projections, height, width)。
+        folder: 投影图像所在文件夹，用于加载校正图像。
+        config: 重建配置对象。
+        callback: 进度回调函数。
+
+    Returns:
+        np.ndarray: 预处理后的投影栈，float32类型，已准备好进行重建。
+
+    Notes:
+        - 对数变换：被用来将强度转换为衰减系数
+        - 异常值（NaN、Inf）会被替换为0
+    """
     data = projections.astype(np.float32, copy=True)
 
     if config.use_dark_flat:
@@ -77,6 +139,32 @@ def run_fdk_reconstruction(
     config: ReconstructionConfig,
     callback: ProgressCallback | None = None,
 ) -> np.ndarray:
+    """
+    执行FDK锥束CT重建。
+
+    这是主重建函数，完成以下步骤：
+    1. 加载投影图像
+    2. 预处理投影（校正+对数变换）
+    3. 设置几何参数（投影几何和体数据几何）
+    4. 使用ASTRA Toolbox的FDK_CUDA算法进行重建
+    5. 导出结果（体数据.npy、配置.json、切片PNG）
+
+    Args:
+        config: 重建配置对象，包含所有必要参数。
+        callback: 进度回调函数，用于输出日志信息。
+
+    Returns:
+        np.ndarray: 重建结果体数据，形状为(volume_size_z, volume_size_y, volume_size_x)。
+
+    Raises:
+        RuntimeError: 未安装ASTRA Toolbox或其他重建错误时抛出。
+        FileNotFoundError: 无法找到投影图像时抛出。
+
+    Notes:
+        - 需要NVIDIA CUDA支持（FDK_CUDA算法）
+        - 结果自动保存到 config.output_dir 目录
+        - 包括原始体数据(volume.npy)、配置(config.json)、切片(slices/)
+    """
     try:
         import astra
     except Exception as exc:

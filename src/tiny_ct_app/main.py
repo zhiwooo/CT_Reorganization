@@ -1,3 +1,10 @@
+"""
+Tiny CT 工作站主程序模块。
+
+提供PySide6 GUI界面，用于加载投影图像、配置几何参数、
+执行CT重建以及查看结果。支持实时预览投影和重建切片。
+"""
+
 from __future__ import annotations
 
 import os
@@ -37,7 +44,10 @@ from .reconstruction import run_fdk_reconstruction
 
 
 class ImageView(QLabel):
+    """用于显示投影图像或重建切片的图像查看器。"""
+
     def __init__(self) -> None:
+        """初始化图像查看器。"""
         super().__init__("请选择投影目录或开始重建")
         self.setAlignment(Qt.AlignCenter)
         self.setMinimumSize(520, 520)
@@ -45,14 +55,22 @@ class ImageView(QLabel):
         self._image: np.ndarray | None = None
 
     def set_array(self, image: np.ndarray) -> None:
+        """
+        设置并显示图像数组。
+
+        Args:
+            image: 输入图像数组。
+        """
         self._image = normalize_for_display(image)
         self._refresh()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
+        """处理窗口大小改变事件。"""
         super().resizeEvent(event)
         self._refresh()
 
     def _refresh(self) -> None:
+        """刷新显示的图像（调整大小到当前窗口）。"""
         if self._image is None:
             return
         h, w = self._image.shape
@@ -62,15 +80,31 @@ class ImageView(QLabel):
 
 
 class ReconstructionWorker(QObject):
+    """
+    在独立线程中执行CT重建的工作线程。
+
+    信号：
+        finished(object): 重建成功完成，参数为重建的体数据
+        failed(str): 重建失败，参数为错误信息
+        log(str): 进度日志消息
+    """
+
     finished = Signal(object)
     failed = Signal(str)
     log = Signal(str)
 
     def __init__(self, config: ReconstructionConfig) -> None:
+        """
+        初始化重建工作线程。
+
+        Args:
+            config: 重建配置对象。
+        """
         super().__init__()
         self.config = config
 
     def run(self) -> None:
+        """执行重建任务。信号会自动发出进度信息。"""
         try:
             volume = run_fdk_reconstruction(self.config, self.log.emit)
         except Exception:
@@ -80,7 +114,18 @@ class ReconstructionWorker(QObject):
 
 
 class MainWindow(QMainWindow):
+    """
+    Tiny CT工作站主窗口。
+
+    提供用户界面用于：
+    - 加载投影图像
+    - 配置重建参数（几何参数、体数据参数、校正参数）
+    - 执行CT重建
+    - 实时预览投影和重建结果
+    """
+
     def __init__(self) -> None:
+        """初始化主窗口。"""
         super().__init__()
         self.setWindowTitle("Tiny CT - CT重建算法验证工具")
         self.resize(1180, 760)
@@ -93,6 +138,7 @@ class MainWindow(QMainWindow):
         self._load_default_folder()
 
     def _build_ui(self) -> None:
+        """构建用户界面。"""
         tabs = QTabWidget()
         tabs.addTab(self._build_reconstruction_tab(), "CT重建")
         tabs.addTab(self._build_calibration_tab(), "参数校正")
@@ -261,8 +307,14 @@ class MainWindow(QMainWindow):
         elif self.projections is not None:
             self.slice_label.setText(f"投影：{index + 1}/{self.projections.shape[0]}")
             self.image_view.set_array(self.projections[index])
-
+
     def make_config(self) -> ReconstructionConfig:
+        """
+        从UI控件读取参数并创建重建配置对象。
+
+        Returns:
+            ReconstructionConfig: 包含用户输入的所有参数的配置对象。
+        """
         return ReconstructionConfig(
             projection_dir=self.projection_dir.text(),
             output_dir=self.output_dir.text(),
@@ -284,6 +336,12 @@ class MainWindow(QMainWindow):
         )
 
     def start_reconstruction(self) -> None:
+        """
+        启动重建任务。
+
+        在独立线程中执行重建以避免阻塞UI。
+        重建状态通过信号进行通信。
+        """
         self.reconstruct_button.setEnabled(False)
         config = self.make_config()
         self.log("提交重建任务。")
@@ -300,6 +358,14 @@ class MainWindow(QMainWindow):
         self.worker_thread.start()
 
     def on_reconstruction_finished(self, volume: object) -> None:
+        """
+        处理重建完成事件。
+
+        更新显示的体数据并刷新切片视图。
+
+        Args:
+            volume: 重建完成的体数据。
+        """
         self.volume = volume
         if isinstance(self.volume, np.ndarray):
             self.slice_slider.setRange(0, max(0, self.volume.shape[0] - 1))
@@ -308,20 +374,43 @@ class MainWindow(QMainWindow):
         self.reconstruct_button.setEnabled(True)
 
     def on_reconstruction_failed(self, message: str) -> None:
+        """
+        处理重建失败事件。
+
+        显示错误对话框并记录错误信息。
+
+        Args:
+            message: 错误信息。
+        """
         self.log(message)
         QMessageBox.critical(self, "重建失败", message)
         self.reconstruct_button.setEnabled(True)
 
     def open_output_dir(self) -> None:
+        """在文件管理器中打开输出目录。"""
         path = Path(self.output_dir.text())
         path.mkdir(parents=True, exist_ok=True)
         os.startfile(path)
 
     def log(self, message: str) -> None:
+        """
+        在日志框中添加消息。
+
+        Args:
+            message: 要添加的消息。
+        """
         self.log_box.append(message)
 
 
 def main() -> int:
+    """
+    应用程序入口点。
+
+    创建Qt应用和主窗口，然后启动事件循环。
+
+    Returns:
+        int: 应用程序退出代码。
+    """
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
