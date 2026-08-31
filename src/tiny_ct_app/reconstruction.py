@@ -52,6 +52,43 @@ def _shift_columns(image: np.ndarray, offset_px: float) -> np.ndarray:
     return np.vstack([np.interp(shifted_x, x, row, left=row[0], right=row[-1]) for row in image])
 
 
+def _apply_detector_offsets(
+    projections: np.ndarray,
+    offset_x_mm: float,
+    offset_y_mm: float,
+    px_size_x_mm: float,
+    px_size_y_mm: float,
+    callback: ProgressCallback | None,
+) -> np.ndarray:
+    """Apply detector translation offsets using a simple integer-pixel shift."""
+    if abs(offset_x_mm) < 1e-6 and abs(offset_y_mm) < 1e-6:
+        return projections
+
+    x_shift = int(round(offset_x_mm / max(px_size_x_mm, 1e-6)))
+    y_shift = int(round(offset_y_mm / max(px_size_y_mm, 1e-6)))
+    if x_shift == 0 and y_shift == 0:
+        return projections
+
+    _log(callback, f"应用探测器偏移校正：dx={offset_x_mm:.4g} mm, dy={offset_y_mm:.4g} mm")
+    corrected = []
+    for proj in projections:
+        shifted = proj.copy()
+        if x_shift != 0:
+            shifted = np.roll(shifted, shift=x_shift, axis=1)
+            if x_shift > 0:
+                shifted[:, :x_shift] = shifted[:, x_shift : x_shift + 1]
+            else:
+                shifted[:, x_shift:] = shifted[:, x_shift - 1 : x_shift]
+        if y_shift != 0:
+            shifted = np.roll(shifted, shift=y_shift, axis=0)
+            if y_shift > 0:
+                shifted[:y_shift, :] = shifted[y_shift : y_shift + 1, :]
+            else:
+                shifted[y_shift:, :] = shifted[y_shift - 1 : y_shift, :]
+        corrected.append(shifted)
+    return np.stack(corrected, axis=0).astype(np.float32)
+
+
 def _apply_detector_roll(projections: np.ndarray, roll_deg: float, callback: ProgressCallback | None) -> np.ndarray:
     """
     应用探测器面内偏转校正。
@@ -131,6 +168,14 @@ def preprocess_projections(
         _log(callback, f"应用旋转中心偏移：{config.rotation_center_offset_px:.4g} px")
         data = np.stack([_shift_columns(proj, config.rotation_center_offset_px) for proj in data], axis=0)
 
+    data = _apply_detector_offsets(
+        data,
+        config.detector_offset_x_mm,
+        config.detector_offset_y_mm,
+        config.detector_pixel_size_x_mm,
+        config.detector_pixel_size_y_mm,
+        callback,
+    )
     data = _apply_detector_roll(data, config.detector_roll_deg, callback)
     return data.astype(np.float32, copy=False)
 

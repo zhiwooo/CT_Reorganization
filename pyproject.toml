@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 ct = "tiny_ct_app.main:main"
+tiny-ct-cli = "tiny_ct_app.main:cli_main"
 
 [build-system]
 requires = ["hatchling"]

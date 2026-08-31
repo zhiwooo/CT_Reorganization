@@ -7,6 +7,7 @@ Tiny CT 工作站主程序模块。
 
 from __future__ import annotations
 
+import argparse
 import os
 from pathlib import Path
 import sys
@@ -73,8 +74,9 @@ class ImageView(QLabel):
         """刷新显示的图像（调整大小到当前窗口）。"""
         if self._image is None:
             return
-        h, w = self._image.shape
-        qimage = QImage(self._image.data, w, h, w, QImage.Format_Grayscale8).copy()
+        display = np.ascontiguousarray(self._image)
+        h, w = display.shape
+        qimage = QImage(display.data, w, h, w, QImage.Format_Grayscale8).copy()
         pixmap = QPixmap.fromImage(qimage)
         self.setPixmap(pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
@@ -402,15 +404,79 @@ class MainWindow(QMainWindow):
         self.log_box.append(message)
 
 
-def main() -> int:
+def _build_cli_parser() -> argparse.ArgumentParser:
+    """构建命令行参数解析器。"""
+    parser = argparse.ArgumentParser(description="Tiny CT workstation")
+    parser.add_argument("--projection-dir", default=str(Path.cwd() / "proj"), help="投影图像目录")
+    parser.add_argument("--output-dir", default=str(Path.cwd() / "recon_result"), help="重建输出目录")
+    parser.add_argument("--projection-count", type=int, default=360, help="读取投影的数量上限")
+    parser.add_argument("--sod", type=float, default=200.0, help="源物距（mm）")
+    parser.add_argument("--sdd", type=float, default=800.0, help="源探距（mm）")
+    parser.add_argument("--detector-pixel-size-x", type=float, default=0.2, help="探测器横向像素间隔（mm）")
+    parser.add_argument("--detector-pixel-size-y", type=float, default=0.2, help="探测器纵向像素间隔（mm）")
+    parser.add_argument("--detector-roll", type=float, default=2.0, help="探测器面内偏转（deg）")
+    parser.add_argument("--detector-offset-x", type=float, default=0.0, help="探测器横向偏移（mm）")
+    parser.add_argument("--detector-offset-y", type=float, default=0.0, help="探测器纵向偏移（mm）")
+    parser.add_argument("--rotation-center-offset", type=float, default=0.0, help="旋转中心偏移（px）")
+    parser.add_argument("--vol-size-x", type=int, default=256, help="重建体数据 X 尺寸")
+    parser.add_argument("--vol-size-y", type=int, default=256, help="重建体数据 Y 尺寸")
+    parser.add_argument("--vol-size-z", type=int, default=256, help="重建体数据 Z 尺寸")
+    parser.add_argument("--voxel-size", type=float, default=0.2, help="体素尺寸（mm）")
+    parser.add_argument("--no-dark-flat", action="store_true", help="关闭 dark/flat 校正")
+    parser.add_argument("--no-png", action="store_true", help="不导出 PNG 切片")
+    parser.add_argument("--gui", action="store_true", help="强制启动 GUI 模式")
+    return parser
+
+
+def cli_main(argv: list[str] | None = None) -> int:
+    """运行命令行重建模式。"""
+    parser = _build_cli_parser()
+    args = parser.parse_args(argv)
+    config = ReconstructionConfig(
+        projection_dir=args.projection_dir,
+        output_dir=args.output_dir,
+        projection_count=args.projection_count,
+        source_object_distance_mm=args.sod,
+        source_detector_distance_mm=args.sdd,
+        detector_pixel_size_x_mm=args.detector_pixel_size_x,
+        detector_pixel_size_y_mm=args.detector_pixel_size_y,
+        detector_roll_deg=args.detector_roll,
+        detector_offset_x_mm=args.detector_offset_x,
+        detector_offset_y_mm=args.detector_offset_y,
+        rotation_center_offset_px=args.rotation_center_offset,
+        volume_size_x=args.vol_size_x,
+        volume_size_y=args.vol_size_y,
+        volume_size_z=args.vol_size_z,
+        voxel_size_mm=args.voxel_size,
+        use_dark_flat=not args.no_dark_flat,
+        save_png_slices=not args.no_png,
+    )
+
+    try:
+        volume = run_fdk_reconstruction(config, lambda message: print(f"[tiny-ct] {message}"))
+    except Exception as exc:
+        print(f"重建失败：{exc}", file=sys.stderr)
+        return 1
+
+    print(f"重建完成: shape={volume.shape}, output_dir={config.output_dir}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
     """
     应用程序入口点。
 
-    创建Qt应用和主窗口，然后启动事件循环。
+    若命令行带参数，优先执行 CLI 重建；否则启动 GUI。
 
     Returns:
         int: 应用程序退出代码。
     """
+    if argv is None:
+        argv = sys.argv[1:]
+
+    if argv and not ("--gui" in argv or "gui" in argv):
+        return cli_main(argv)
+
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()

@@ -16,6 +16,10 @@ import tifffile
 
 # 支持的投影图像文件名模式
 IMAGE_PATTERNS = ("proj_*.tif", "proj_*.tiff", "proj_*.png", "proj_*.jpg", "proj_*.jpeg")
+CALIBRATION_PATTERNS = (
+    ("dark_*.tif", "dark_*.tiff", "dark_*.png", "dark_*.jpg", "dark_*.jpeg"),
+    ("flat_*.tif", "flat_*.tiff", "flat_*.png", "flat_*.jpg", "flat_*.jpeg"),
+)
 
 
 def find_projection_files(folder: str | Path) -> list[Path]:
@@ -63,9 +67,13 @@ def read_image(path: str | Path) -> np.ndarray:
         image = tifffile.imread(source)
     else:
         image = np.asarray(Image.open(source))
-    if image.ndim == 3:
+
+    if image.ndim == 3 and image.shape[-1] in {3, 4}:
         image = image[..., 0]
-    return image.astype(np.float32)
+    elif image.ndim == 3 and image.shape[0] in {3, 4}:
+        image = image[0]
+
+    return np.asarray(image, dtype=np.float32)
 
 
 def load_projection_stack(folder: str | Path, limit: int | None = None) -> tuple[np.ndarray, list[Path]]:
@@ -110,8 +118,12 @@ def load_optional_calibration(folder: str | Path) -> tuple[np.ndarray | None, np
             (dark_image, flat_image) - 如果文件不存在则对应位置为None。
     """
     base = Path(folder)
-    dark_files = sorted(base.glob("dark_*.tif")) + sorted(base.glob("dark_*.tiff"))
-    flat_files = sorted(base.glob("flat_*.tif")) + sorted(base.glob("flat_*.tiff"))
+    dark_files: list[Path] = []
+    flat_files: list[Path] = []
+    for dark_pattern, flat_pattern in CALIBRATION_PATTERNS:
+        dark_files.extend(sorted(base.glob(dark_pattern)))
+        flat_files.extend(sorted(base.glob(flat_pattern)))
+
     dark = read_image(dark_files[0]) if dark_files else None
     flat = read_image(flat_files[0]) if flat_files else None
     return dark, flat
