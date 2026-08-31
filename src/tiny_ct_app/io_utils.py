@@ -16,10 +16,9 @@ import tifffile
 
 # 支持的投影图像文件名模式
 IMAGE_PATTERNS = ("proj_*.tif", "proj_*.tiff", "proj_*.png", "proj_*.jpg", "proj_*.jpeg")
-CALIBRATION_PATTERNS = (
-    ("dark_*.tif", "dark_*.tiff", "dark_*.png", "dark_*.jpg", "dark_*.jpeg"),
-    ("flat_*.tif", "flat_*.tiff", "flat_*.png", "flat_*.jpg", "flat_*.jpeg"),
-)
+DARK_PATTERNS = ("dark_*.tif", "dark_*.tiff", "dark_*.png", "dark_*.jpg", "dark_*.jpeg")
+FLAT_PATTERNS = ("flat_*.tif", "flat_*.tiff", "flat_*.png", "flat_*.jpg", "flat_*.jpeg")
+ALL_IMAGE_PATTERNS = ("*.tif", "*.tiff", "*.png", "*.jpg", "*.jpeg")
 
 
 def find_projection_files(folder: str | Path) -> list[Path]:
@@ -40,8 +39,12 @@ def find_projection_files(folder: str | Path) -> list[Path]:
     for pattern in IMAGE_PATTERNS:
         files.extend(sorted(base.glob(pattern)))
     if not files:
-        for pattern in ("*.tif", "*.tiff", "*.png", "*.jpg", "*.jpeg"):
-            files.extend(sorted(base.glob(pattern)))
+        for pattern in ALL_IMAGE_PATTERNS:
+            files.extend(
+                path
+                for path in sorted(base.glob(pattern))
+                if not path.name.lower().startswith(("dark_", "flat_"))
+            )
     return files
 
 
@@ -120,8 +123,9 @@ def load_optional_calibration(folder: str | Path) -> tuple[np.ndarray | None, np
     base = Path(folder)
     dark_files: list[Path] = []
     flat_files: list[Path] = []
-    for dark_pattern, flat_pattern in CALIBRATION_PATTERNS:
+    for dark_pattern in DARK_PATTERNS:
         dark_files.extend(sorted(base.glob(dark_pattern)))
+    for flat_pattern in FLAT_PATTERNS:
         flat_files.extend(sorted(base.glob(flat_pattern)))
 
     dark = read_image(dark_files[0]) if dark_files else None
@@ -166,6 +170,8 @@ def save_png_stack(volume: np.ndarray, output_dir: str | Path) -> None:
     """
     target = Path(output_dir)
     target.mkdir(parents=True, exist_ok=True)
+    for stale_slice in target.glob("slice_*.png"):
+        stale_slice.unlink()
     for index, slice_image in enumerate(volume):
         display = normalize_for_display(slice_image)
         Image.fromarray(display).save(target / f"slice_{index:04d}.png")

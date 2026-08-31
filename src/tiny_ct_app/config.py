@@ -61,6 +61,26 @@ class ReconstructionConfig:
         """
         return self.source_detector_distance_mm - self.source_object_distance_mm
 
+    def validate(self) -> None:
+        """
+        校验重建参数，尽早给出清晰错误信息。
+
+        Raises:
+            ValueError: 参数不满足锥束CT重建的基本几何或尺寸约束。
+        """
+        if self.source_object_distance_mm <= 0:
+            raise ValueError("源物距 SOD 必须大于 0。")
+        if self.source_detector_distance_mm <= self.source_object_distance_mm:
+            raise ValueError("源探距 SDD 必须大于源物距 SOD。")
+        if self.projection_count <= 0:
+            raise ValueError("投影数量必须大于 0。")
+        if self.detector_pixel_size_x_mm <= 0 or self.detector_pixel_size_y_mm <= 0:
+            raise ValueError("探测器像素间隔必须大于 0。")
+        if self.volume_size_x <= 0 or self.volume_size_y <= 0 or self.volume_size_z <= 0:
+            raise ValueError("体数据尺寸必须全部大于 0。")
+        if self.voxel_size_mm <= 0:
+            raise ValueError("体素尺寸必须大于 0。")
+
     def save(self, path: str | Path) -> None:
         """
         将配置保存为JSON文件。

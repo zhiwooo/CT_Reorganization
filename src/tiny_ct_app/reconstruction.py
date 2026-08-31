@@ -52,6 +52,36 @@ def _shift_columns(image: np.ndarray, offset_px: float) -> np.ndarray:
     return np.vstack([np.interp(shifted_x, x, row, left=row[0], right=row[-1]) for row in image])
 
 
+def _shift_axis_with_edge_fill(image: np.ndarray, shift: int, axis: int) -> np.ndarray:
+    """Shift an image along one axis and fill exposed pixels with edge values."""
+    if shift == 0:
+        return image
+
+    length = image.shape[axis]
+    if length == 0:
+        return image
+
+    magnitude = abs(shift)
+    if magnitude >= length:
+        edge_index = 0 if shift > 0 else length - 1
+        edge = np.take(image, edge_index, axis=axis)
+        return np.repeat(np.expand_dims(edge, axis=axis), length, axis=axis)
+
+    pad_width = [(0, 0)] * image.ndim
+    if shift > 0:
+        pad_width[axis] = (magnitude, 0)
+        padded = np.pad(image, pad_width, mode="edge")
+        slices = [slice(None)] * image.ndim
+        slices[axis] = slice(0, length)
+    else:
+        pad_width[axis] = (0, magnitude)
+        padded = np.pad(image, pad_width, mode="edge")
+        slices = [slice(None)] * image.ndim
+        slices[axis] = slice(magnitude, magnitude + length)
+
+    return padded[tuple(slices)]
+
+
 def _apply_detector_offsets(
     projections: np.ndarray,
     offset_x_mm: float,
@@ -72,19 +102,8 @@ def _apply_detector_offsets(
     _log(callback, f"应用探测器偏移校正：dx={offset_x_mm:.4g} mm, dy={offset_y_mm:.4g} mm")
     corrected = []
     for proj in projections:
-        shifted = proj.copy()
-        if x_shift != 0:
-            shifted = np.roll(shifted, shift=x_shift, axis=1)
-            if x_shift > 0:
-                shifted[:, :x_shift] = shifted[:, x_shift : x_shift + 1]
-            else:
-                shifted[:, x_shift:] = shifted[:, x_shift - 1 : x_shift]
-        if y_shift != 0:
-            shifted = np.roll(shifted, shift=y_shift, axis=0)
-            if y_shift > 0:
-                shifted[:y_shift, :] = shifted[y_shift : y_shift + 1, :]
-            else:
-                shifted[y_shift:, :] = shifted[y_shift - 1 : y_shift, :]
+        shifted = _shift_axis_with_edge_fill(proj, x_shift, axis=1)
+        shifted = _shift_axis_with_edge_fill(shifted, y_shift, axis=0)
         corrected.append(shifted)
     return np.stack(corrected, axis=0).astype(np.float32)
 
@@ -210,10 +229,7 @@ def run_fdk_reconstruction(
         - 结果自动保存到 config.output_dir 目录
         - 包括原始体数据(volume.npy)、配置(config.json)、切片(slices/)
     """
-    try:
-        import astra
-    except Exception as exc:
-        raise RuntimeError("未能导入 ASTRA Toolbox，请先通过 uv 安装 astra-toolbox。") from exc
+    config.validate()
 
     projection_dir = Path(config.projection_dir)
     output_dir = Path(config.output_dir)
@@ -229,6 +245,11 @@ def run_fdk_reconstruction(
     projections = preprocess_projections(raw, projection_dir, config, callback)
     detector_rows, detector_cols = projections.shape[1], projections.shape[2]
     angles = np.linspace(0.0, 2.0 * np.pi, projections.shape[0], endpoint=False).astype(np.float32)
+
+    try:
+        import astra
+    except Exception as exc:
+        raise RuntimeError("未能导入 ASTRA Toolbox，请先通过 uv 安装 astra-toolbox。") from exc
 
     _log(callback, "创建 ASTRA 锥束几何。")
     proj_geom = astra.create_proj_geom(
