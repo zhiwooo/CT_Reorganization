@@ -40,7 +40,7 @@ uv run python --version
 启动软件：
 
 ```powershell
-uv run tiny-ct
+uv run ct
 ```
 
 或：
@@ -92,7 +92,7 @@ src/tiny_ct_app/
 
 1. **启动应用**
    ```powershell
-   uv run tiny-ct
+   uv run ct
    ```
 
 2. **选择投影目录**

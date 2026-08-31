@@ -11,7 +11,7 @@ Tiny CT Workstation - 轻量级工业CT重建工作站。
 - main: 用户界面和应用入口
 
 使用示例：
-    uv run tiny-ct              # 启动GUI应用
+    uv run ct              # 启动GUI应用
     uv run python -m tiny_ct_app.main
 
 典型工作流：
