@@ -37,7 +37,7 @@ $env:UV_PROJECT_ENVIRONMENT = "D:\Office\工业CT重建\.venv_managed"
 uv run python --version
 ```
 
-启动软件：
+启动 GUI：
 
 ```powershell
 uv run tiny-ct
@@ -47,6 +47,18 @@ uv run tiny-ct
 
 ```powershell
 uv run python -m tiny_ct_app.main
+```
+
+命令行直接重建：
+
+```powershell
+uv run tiny-ct-cli --projection-dir ./proj --output-dir ./recon_result --projection-count 360 --sod 200 --sdd 800 --voxel-size 0.2
+```
+
+如果需要强制启动 GUI：
+
+```powershell
+uv run python -m tiny_ct_app.main --gui
 ```
 
 ## 当前测试数据
