@@ -73,8 +73,9 @@ class ImageView(QLabel):
         """刷新显示的图像（调整大小到当前窗口）。"""
         if self._image is None:
             return
-        h, w = self._image.shape
-        qimage = QImage(self._image.data, w, h, w, QImage.Format_Grayscale8).copy()
+        display = np.ascontiguousarray(self._image)
+        h, w = display.shape
+        qimage = QImage(display.data, w, h, w, QImage.Format_Grayscale8).copy()
         pixmap = QPixmap.fromImage(qimage)
         self.setPixmap(pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
