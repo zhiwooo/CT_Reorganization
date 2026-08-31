@@ -1,0 +1,24 @@
+[project]
+name = "tiny-ct-workstation"
+version = "0.1.0"
+description = "A lightweight PySide6 + ASTRA Toolbox CT reconstruction workstation."
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "astra-toolbox>=2.2",
+    "numpy>=1.26",
+    "pillow>=10.0",
+    "pyside6>=6.7",
+    "scipy>=1.11",
+    "tifffile>=2024.2.12",
+]
+
+[project.scripts]
+tiny-ct = "tiny_ct_app.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tiny_ct_app"]
