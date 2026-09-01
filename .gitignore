@@ -7,3 +7,7 @@ __pycache__/
 recon_result/
 recon_*/
 recon_smoke/
+build/
+dist/
+release/
+*.spec

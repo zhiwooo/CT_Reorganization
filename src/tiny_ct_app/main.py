@@ -38,9 +38,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .config import ReconstructionConfig
-from .io_utils import load_projection_stack, normalize_for_display
-from .reconstruction import estimate_rotation_center_offset, run_fdk_reconstruction
+from tiny_ct_app import __version__
+from tiny_ct_app.config import ReconstructionConfig
+from tiny_ct_app.io_utils import load_projection_stack, normalize_for_display
+from tiny_ct_app.reconstruction import estimate_rotation_center_offset, run_fdk_reconstruction
 
 
 class ImageView(QLabel):
@@ -574,13 +575,18 @@ def main() -> int:
     """
     应用程序入口点。
 
-    启动 GUI。
+    启动 GUI，或在传入 --smoke-test 时完成窗口初始化后立即退出。
 
     Returns:
         int: 应用程序退出代码。
     """
     app = QApplication(sys.argv)
     window = MainWindow()
+    if "--smoke-test" in sys.argv:
+        print(f"Tiny CT {__version__} smoke test ok")
+        window.close()
+        app.quit()
+        return 0
     window.show()
     return app.exec()
 
