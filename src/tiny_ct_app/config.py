@@ -42,10 +42,10 @@ class ReconstructionConfig:
     rotation_center_offset_px: float = 0.0  # 旋转中心偏移（像素）
 
     # 体数据参数
-    volume_size_x: int = 256  # 体数据X方向大小（像素）
-    volume_size_y: int = 256  # 体数据Y方向大小（像素）
-    volume_size_z: int = 256  # 体数据Z方向大小（像素）
-    voxel_size_mm: float = 0.2  # 体素大小（mm）
+    volume_size_x: int = 512  # 体数据X方向大小（像素）
+    volume_size_y: int = 512  # 体数据Y方向大小（像素）
+    volume_size_z: int = 512  # 体数据Z方向大小（像素）
+    voxel_size_mm: float = 0.05  # 体素大小（mm）
 
     # 处理选项
     use_background_correction: bool = True  # 是否使用背景图像校正

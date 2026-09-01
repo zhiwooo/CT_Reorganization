@@ -15,7 +15,11 @@ from tiny_ct_app.io_utils import (
     load_projection_stack,
     save_png_stack,
 )
-from tiny_ct_app.reconstruction import _apply_background_correction, _apply_detector_offsets
+from tiny_ct_app.reconstruction import (
+    _apply_background_correction,
+    _apply_detector_offsets,
+    estimate_rotation_center_offset,
+)
 
 
 def _write_image(path: Path, value: int) -> None:
@@ -83,6 +87,20 @@ def test_background_correction_subtracts_and_clips() -> None:
     np.testing.assert_array_equal(corrected, np.array([[[2, 6], [0, 0]]], dtype=np.float32))
 
 
+def test_estimate_rotation_center_offset_returns_zero_for_centered_silhouette() -> None:
+    projections = np.ones((4, 6, 9), dtype=np.float32)
+    projections[:, :, 2:7] = 0.25
+
+    assert estimate_rotation_center_offset(projections) == 0.0
+
+
+def test_estimate_rotation_center_offset_returns_correction_for_shifted_silhouette() -> None:
+    projections = np.ones((4, 6, 9), dtype=np.float32)
+    projections[:, :, 1:6] = 0.25
+
+    assert estimate_rotation_center_offset(projections) == 1.0
+
+
 def test_save_png_stack_removes_stale_slices(tmp_path: Path) -> None:
     save_png_stack(np.zeros((3, 4, 5), dtype=np.float32), tmp_path)
     save_png_stack(np.zeros((1, 4, 5), dtype=np.float32), tmp_path)
@@ -128,7 +146,39 @@ def test_main_window_starts_with_empty_projection_path() -> None:
 
     assert app is not None
     assert window.projection_dir.text() == ""
+    assert window.center_offset.value() == 0.0
+    assert window.voxel.value() == 0.05
+    assert window.vol_x.value() == 512
+    assert window.vol_y.value() == 512
+    assert window.vol_z.value() == 512
+    assert window.correction_formula.currentText() == "μ = -ln((max(I - B, 0) - D) / (F - D))"
     assert window.projections is None
     assert window.volume is None
     assert not window.slice_slider.isEnabled()
     assert not window.reconstruct_button.isEnabled()
+    assert not window.estimate_center_button.isEnabled()
+    assert not window.calc_voxel_button.isEnabled()
+
+
+def test_main_window_calculates_voxel_size_from_magnification() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from tiny_ct_app.main import MainWindow
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    window = MainWindow()
+    window.det_px_x.setValue(0.2)
+    window.sod.setValue(200.0)
+    window.sdd.setValue(800.0)
+    window.projections = np.zeros((2, 512, 512), dtype=np.float32)
+    window.update_data_dependent_controls()
+
+    window.calculate_voxel_size()
+
+    assert app is not None
+    assert window.calc_voxel_button.isEnabled()
+    assert window.voxel.value() == 0.05
+    assert window.vol_x.value() == 512
+    assert window.vol_y.value() == 512
+    assert window.vol_z.value() == 512

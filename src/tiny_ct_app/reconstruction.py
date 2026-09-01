@@ -156,6 +156,97 @@ def _apply_background_correction(
     return np.maximum(corrected, 0.0).astype(np.float32, copy=False)
 
 
+def _to_attenuation_for_center_estimation(
+    projections: np.ndarray,
+    folder: str | Path | None,
+    use_background_correction: bool,
+    use_dark_flat: bool,
+) -> np.ndarray:
+    """Build attenuation projections for robust center estimation."""
+    data = projections.astype(np.float32, copy=True)
+
+    if folder is not None and use_background_correction:
+        background = load_optional_background(folder)
+        if background is not None and background.shape == data.shape[1:]:
+            data = np.maximum(data - background.astype(np.float32, copy=False), 0.0)
+
+    if folder is not None and use_dark_flat:
+        dark, flat = load_optional_calibration(folder)
+        if dark is not None and flat is not None and dark.shape == data.shape[1:] and flat.shape == data.shape[1:]:
+            data = (data - dark) / np.maximum(flat - dark, 1.0)
+
+    data = np.maximum(data, 1e-6)
+    if np.nanmax(data) > 2.0:
+        data = data / np.nanmax(data)
+    data = -np.log(np.clip(data, 1e-6, None))
+    return np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32, copy=False)
+
+
+def _largest_true_run(mask: np.ndarray) -> tuple[int, int] | None:
+    """Return inclusive start/end indexes for the largest true run in a 1D mask."""
+    indexes = np.flatnonzero(mask)
+    if indexes.size == 0:
+        return None
+
+    breaks = np.flatnonzero(np.diff(indexes) > 1)
+    starts = np.r_[indexes[0], indexes[breaks + 1]]
+    ends = np.r_[indexes[breaks], indexes[-1]]
+    best = int(np.argmax(ends - starts))
+    return int(starts[best]), int(ends[best])
+
+
+def _estimate_center_from_silhouette(projections: np.ndarray) -> float:
+    """Estimate correction offset from the projection silhouette center."""
+    width = projections.shape[2]
+    geometric_center = (width - 1) / 2.0
+    sample_count = min(24, projections.shape[0])
+    sample_indexes = np.linspace(0, projections.shape[0] - 1, sample_count, dtype=int)
+    offsets: list[float] = []
+
+    for index in sample_indexes:
+        profile = np.mean(projections[index], axis=0)
+        lo, hi = np.percentile(profile, [5.0, 95.0])
+        if hi <= lo:
+            continue
+        mask = profile > (lo + (hi - lo) * 0.25)
+        run = _largest_true_run(mask)
+        if run is None:
+            continue
+        start, end = run
+        if end - start < max(4, width // 32):
+            continue
+        object_center = (start + end) / 2.0
+        offsets.append(geometric_center - object_center)
+
+    if not offsets:
+        raise ValueError("投影主体轮廓不清晰，无法估算旋转中心。")
+    return float(np.median(offsets))
+
+
+def estimate_rotation_center_offset(
+    projections: np.ndarray,
+    folder: str | Path | None = None,
+    use_background_correction: bool = True,
+    use_dark_flat: bool = True,
+) -> float:
+    """
+    估算旋转中心偏移。
+
+    先转换为衰减图，再使用多张投影的主体外轮廓中心估算相对
+    图像几何中心的校正量。正值表示投影主体偏左，需要向右校正。
+    """
+    if projections.ndim != 3 or projections.shape[0] < 2:
+        raise ValueError("至少需要两张投影才能估算旋转中心。")
+
+    attenuation = _to_attenuation_for_center_estimation(
+        projections,
+        folder,
+        use_background_correction=use_background_correction,
+        use_dark_flat=use_dark_flat,
+    )
+    return _estimate_center_from_silhouette(attenuation)
+
+
 def preprocess_projections(
     projections: np.ndarray,
     folder: str | Path,

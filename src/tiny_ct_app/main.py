@@ -40,7 +40,7 @@ from PySide6.QtWidgets import (
 
 from .config import ReconstructionConfig
 from .io_utils import load_projection_stack, normalize_for_display
-from .reconstruction import run_fdk_reconstruction
+from .reconstruction import estimate_rotation_center_offset, run_fdk_reconstruction
 
 
 class ImageView(QLabel):
@@ -174,8 +174,7 @@ class MainWindow(QMainWindow):
         self.worker: ReconstructionWorker | None = None
 
         self._build_ui()
-        self.slice_slider.setEnabled(False)
-        self.reconstruct_button.setEnabled(False)
+        self.update_data_dependent_controls()
 
     def _build_ui(self) -> None:
         """构建用户界面。"""
@@ -226,6 +225,7 @@ class MainWindow(QMainWindow):
         note = QLabel("第一版支持通过参数进行几何校正；后续可扩展标定球自动校正和自动旋转中心估计。")
         note.setWordWrap(True)
         layout.addWidget(note)
+        layout.addWidget(self._build_background_group())
         layout.addWidget(self._build_correction_group())
         layout.addStretch(1)
         return page
@@ -255,6 +255,29 @@ class MainWindow(QMainWindow):
         self.proj_count = self._spin(1, 20000, 360)
         self.det_px_x = self._double_spin(0.0001, 100.0, 0.2, " mm")
         self.det_px_y = self._double_spin(0.0001, 100.0, 0.2, " mm")
+        self.center_offset = self._double_spin(-10000.0, 10000.0, 0.0, " px")
+        self.center_offset.valueChanged.connect(lambda _value: self.update_display_index(self.slice_slider.value()))
+        center_row = QHBoxLayout()
+        center_row.addWidget(self.center_offset, 1)
+        self.estimate_center_button = QPushButton("自动计算旋转中心")
+        self.estimate_center_button.clicked.connect(self.estimate_rotation_center)
+        center_row.addWidget(self.estimate_center_button)
+        self.show_rotation_center = QCheckBox("显示旋转中心")
+        self.show_rotation_center.setChecked(True)
+        self.show_rotation_center.stateChanged.connect(lambda _state: self.update_display_index(self.slice_slider.value()))
+        form.addRow("算法", self.algorithm)
+        form.addRow("源物距 SOD", self.sod)
+        form.addRow("源探距 SDD", self.sdd)
+        form.addRow("投影数量", self.proj_count)
+        form.addRow("探测器横向像素间隔", self.det_px_x)
+        form.addRow("探测器纵向像素间隔", self.det_px_y)
+        form.addRow("旋转中心(pixel)", center_row)
+        form.addRow("", self.show_rotation_center)
+        return group
+
+    def _build_background_group(self) -> QGroupBox:
+        group = QGroupBox("背景矫正")
+        form = QFormLayout(group)
         self.use_background_correction = QCheckBox("使用背景矫正")
         self.use_background_correction.setChecked(True)
         self.use_dark_flat = QCheckBox("使用 dark/flat")
@@ -264,12 +287,6 @@ class MainWindow(QMainWindow):
         self.use_background_correction.stateChanged.connect(self.update_correction_formula)
         self.use_dark_flat.stateChanged.connect(self.update_correction_formula)
         self.update_correction_formula()
-        form.addRow("算法", self.algorithm)
-        form.addRow("源物距 SOD", self.sod)
-        form.addRow("源探距 SDD", self.sdd)
-        form.addRow("投影数量", self.proj_count)
-        form.addRow("探测器横向像素间隔", self.det_px_x)
-        form.addRow("探测器纵向像素间隔", self.det_px_y)
         form.addRow("校正公式", self.correction_formula)
         form.addRow("", self.use_background_correction)
         form.addRow("", self.use_dark_flat)
@@ -297,31 +314,34 @@ class MainWindow(QMainWindow):
         self.det_roll = self._double_spin(-45.0, 45.0, 2.0, " deg")
         self.det_offset_x = self._double_spin(-10000.0, 10000.0, 0.0, " mm")
         self.det_offset_y = self._double_spin(-10000.0, 10000.0, 0.0, " mm")
-        self.center_offset = self._double_spin(-10000.0, 10000.0, 0.0, " px")
-        self.center_offset.valueChanged.connect(lambda _value: self.update_display_index(self.slice_slider.value()))
-        self.show_rotation_center = QCheckBox("显示旋转中心")
-        self.show_rotation_center.setChecked(True)
-        self.show_rotation_center.stateChanged.connect(lambda _state: self.update_display_index(self.slice_slider.value()))
         form.addRow("探测器面内偏转", self.det_roll)
         form.addRow("探测器横向偏移", self.det_offset_x)
         form.addRow("探测器纵向偏移", self.det_offset_y)
-        form.addRow("旋转中心偏移", self.center_offset)
-        form.addRow("", self.show_rotation_center)
         return group
 
     def _build_volume_group(self) -> QGroupBox:
         group = QGroupBox("体数据设置")
         form = QFormLayout(group)
-        self.vol_x = self._spin(16, 2048, 256)
-        self.vol_y = self._spin(16, 2048, 256)
-        self.vol_z = self._spin(16, 2048, 256)
-        self.voxel = self._double_spin(0.0001, 100.0, 0.2, " mm")
+        self.vol_x = self._spin(16, 2048, 512)
+        self.vol_y = self._spin(16, 2048, 512)
+        self.vol_z = self._spin(16, 2048, 512)
+        self.voxel = self._double_spin(0.0001, 100.0, 0.05, " mm", decimals=6)
+        voxel_row = QHBoxLayout()
+        voxel_row.addWidget(self.voxel, 1)
+        self.calc_voxel_button = QPushButton("计算体素尺寸")
+        self.calc_voxel_button.clicked.connect(self.calculate_voxel_size)
+        voxel_row.addWidget(self.calc_voxel_button)
         self.output_dir = QLineEdit(str(Path.cwd() / "recon_result"))
+        output_row = QHBoxLayout()
+        output_row.addWidget(self.output_dir, 1)
+        choose_output = QPushButton("选择目录")
+        choose_output.clicked.connect(self.choose_output_dir)
+        output_row.addWidget(choose_output)
         form.addRow("X 尺寸", self.vol_x)
         form.addRow("Y 尺寸", self.vol_y)
         form.addRow("Z 切片数", self.vol_z)
-        form.addRow("体素尺寸", self.voxel)
-        form.addRow("保存目录", self.output_dir)
+        form.addRow("体素尺寸", voxel_row)
+        form.addRow("保存目录", output_row)
         return group
 
     def _build_action_group(self) -> QGroupBox:
@@ -335,19 +355,33 @@ class MainWindow(QMainWindow):
         layout.addWidget(open_button)
         return group
 
-    def _double_spin(self, low: float, high: float, value: float, suffix: str = "") -> QDoubleSpinBox:
+    def _double_spin(
+        self,
+        low: float,
+        high: float,
+        value: float,
+        suffix: str = "",
+        decimals: int = 4,
+    ) -> QDoubleSpinBox:
         box = QDoubleSpinBox()
         box.setRange(low, high)
-        box.setDecimals(4)
+        box.setDecimals(decimals)
         box.setValue(value)
         box.setSuffix(suffix)
         return box
-
     def _spin(self, low: int, high: int, value: int) -> QSpinBox:
         box = QSpinBox()
         box.setRange(low, high)
         box.setValue(value)
         return box
+
+    def update_data_dependent_controls(self) -> None:
+        """根据是否已导入投影数据刷新相关按钮状态。"""
+        has_data = self.projections is not None
+        self.slice_slider.setEnabled(has_data)
+        self.reconstruct_button.setEnabled(has_data)
+        self.estimate_center_button.setEnabled(has_data)
+        self.calc_voxel_button.setEnabled(has_data)
 
     def choose_projection_dir(self) -> None:
         start_dir = self.projection_dir.text().strip() or str(Path.cwd() / "proj")
@@ -356,14 +390,68 @@ class MainWindow(QMainWindow):
             self.projection_dir.setText(folder)
             self.load_projection_preview()
 
+    def choose_output_dir(self) -> None:
+        start_dir = self.output_dir.text().strip() or str(Path.cwd() / "recon_result")
+        folder = QFileDialog.getExistingDirectory(self, "选择保存目录", start_dir)
+        if folder:
+            self.output_dir.setText(folder)
+
+    def _recommended_sampling(self) -> tuple[float, int, int, int]:
+        voxel_size = self.det_px_x.value() * self.sod.value() / self.sdd.value()
+        if self.projections is None:
+            return voxel_size, self.vol_x.value(), self.vol_y.value(), self.vol_z.value()
+
+        detector_rows, detector_cols = self.projections.shape[1], self.projections.shape[2]
+        object_width_mm = detector_cols * self.det_px_x.value() * self.sod.value() / self.sdd.value()
+        object_height_mm = detector_rows * self.det_px_y.value() * self.sod.value() / self.sdd.value()
+        volume_size_x = max(16, min(2048, int(round(object_width_mm / voxel_size))))
+        volume_size_y = max(16, min(2048, int(round(object_width_mm / voxel_size))))
+        volume_size_z = max(16, min(2048, int(round(object_height_mm / voxel_size))))
+        return voxel_size, volume_size_x, volume_size_y, volume_size_z
+
+    def apply_recommended_sampling(self, *, log: bool) -> None:
+        voxel_size, volume_size_x, volume_size_y, volume_size_z = self._recommended_sampling()
+        self.voxel.setValue(voxel_size)
+        self.vol_x.setValue(volume_size_x)
+        self.vol_y.setValue(volume_size_y)
+        self.vol_z.setValue(volume_size_z)
+        if log:
+            self.log(
+                "按投影视野计算采样："
+                f"体素尺寸 {voxel_size:.6f} mm，"
+                f"体数据 {volume_size_x} x {volume_size_y} x {volume_size_z}"
+            )
+
+    def calculate_voxel_size(self) -> None:
+        self.apply_recommended_sampling(log=True)
+
+    def estimate_rotation_center(self) -> None:
+        if self.projections is None:
+            QMessageBox.information(self, "无法计算", "请先导入投影数据。")
+            return
+        try:
+            offset = estimate_rotation_center_offset(
+                self.projections,
+                folder=self.projection_dir.text(),
+                use_background_correction=self.use_background_correction.isChecked(),
+                use_dark_flat=self.use_dark_flat.isChecked(),
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "计算失败", str(exc))
+            return
+
+        self.center_offset.setValue(offset)
+        self.show_rotation_center.setChecked(True)
+        self.update_display_index(self.slice_slider.value())
+        self.log(f"自动估算旋转中心偏移：{offset:.4g} px")
+
     def load_projection_preview(self) -> None:
         try:
             self.projections, files = load_projection_stack(self.projection_dir.text(), limit=self.proj_count.value())
         except Exception as exc:
             self.projections = None
             self.volume = None
-            self.slice_slider.setEnabled(False)
-            self.reconstruct_button.setEnabled(False)
+            self.update_data_dependent_controls()
             self.image_view.clear("导入失败，请重新选择投影目录")
             self.slice_label.setText("切片/投影：0")
             QMessageBox.warning(self, "加载失败", str(exc))
@@ -371,8 +459,8 @@ class MainWindow(QMainWindow):
         self.log(f"已加载投影预览：{len(files)} 张，尺寸 {self.projections.shape[2]} x {self.projections.shape[1]}")
         self.volume = None
         self.slice_slider.setRange(0, max(0, len(files) - 1))
-        self.slice_slider.setEnabled(True)
-        self.reconstruct_button.setEnabled(True)
+        self.update_data_dependent_controls()
+        self.apply_recommended_sampling(log=False)
         self.slice_slider.setValue(0)
         self.update_display_index(0)
 
