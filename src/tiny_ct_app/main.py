@@ -7,7 +7,6 @@ Tiny CT 工作站主程序模块。
 
 from __future__ import annotations
 
-import argparse
 import os
 from pathlib import Path
 import sys
@@ -15,7 +14,7 @@ import traceback
 
 import numpy as np
 from PySide6.QtCore import QObject, Qt, QThread, Signal
-from PySide6.QtGui import QAction, QImage, QPixmap
+from PySide6.QtGui import QAction, QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -49,21 +48,59 @@ class ImageView(QLabel):
 
     def __init__(self) -> None:
         """初始化图像查看器。"""
-        super().__init__("请选择投影目录或开始重建")
+        super().__init__("尚未导入投影数据")
         self.setAlignment(Qt.AlignCenter)
         self.setMinimumSize(520, 520)
         self.setStyleSheet("background: #111; color: #ddd; border: 1px solid #bbb;")
         self._image: np.ndarray | None = None
+        self._source_width = 0
+        self._source_height = 0
+        self._center_x: float | None = None
 
-    def set_array(self, image: np.ndarray) -> None:
+    def clear(self, message: str = "尚未导入投影数据") -> None:
+        """清空当前显示内容。"""
+        self._image = None
+        self._source_width = 0
+        self._source_height = 0
+        self._center_x = None
+        self.setPixmap(QPixmap())
+        self.setText(message)
+
+    def set_array(self, image: np.ndarray, center_x: float | None = None) -> None:
         """
         设置并显示图像数组。
 
         Args:
             image: 输入图像数组。
+            center_x: 可选的旋转中心横向位置，用于投影预览叠加显示。
         """
         self._image = normalize_for_display(image)
+        self._source_height, self._source_width = self._image.shape
+        self._center_x = center_x
         self._refresh()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        """绘制图像和可选的旋转中心线。"""
+        super().paintEvent(event)
+        if self._image is None or self._center_x is None or self._source_width <= 0 or self._source_height <= 0:
+            return
+
+        widget_w = self.width()
+        widget_h = self.height()
+        scale = min(widget_w / self._source_width, widget_h / self._source_height)
+        display_w = self._source_width * scale
+        display_h = self._source_height * scale
+        left = (widget_w - display_w) / 2.0
+        top = (widget_h - display_h) / 2.0
+        x = left + self._center_x * scale
+        if x < left or x > left + display_w:
+            return
+
+        painter = QPainter(self)
+        pen = QPen(QColor(255, 80, 80, 210), 2)
+        painter.setPen(pen)
+        painter.drawLine(int(round(x)), int(round(top)), int(round(x)), int(round(top + display_h)))
+        painter.end()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         """处理窗口大小改变事件。"""
@@ -137,7 +174,8 @@ class MainWindow(QMainWindow):
         self.worker: ReconstructionWorker | None = None
 
         self._build_ui()
-        self._load_default_folder()
+        self.slice_slider.setEnabled(False)
+        self.reconstruct_button.setEnabled(False)
 
     def _build_ui(self) -> None:
         """构建用户界面。"""
@@ -195,10 +233,11 @@ class MainWindow(QMainWindow):
     def _build_path_group(self) -> QGroupBox:
         group = QGroupBox("投影数据")
         layout = QGridLayout(group)
-        self.projection_dir = QLineEdit(str(Path.cwd() / "proj"))
+        self.projection_dir = QLineEdit()
+        self.projection_dir.setPlaceholderText("请选择或输入投影图像目录")
         browse = QPushButton("选择目录")
         browse.clicked.connect(self.choose_projection_dir)
-        load = QPushButton("加载预览")
+        load = QPushButton("导入并显示")
         load.clicked.connect(self.load_projection_preview)
         layout.addWidget(QLabel("投影目录"), 0, 0)
         layout.addWidget(self.projection_dir, 0, 1)
@@ -216,16 +255,41 @@ class MainWindow(QMainWindow):
         self.proj_count = self._spin(1, 20000, 360)
         self.det_px_x = self._double_spin(0.0001, 100.0, 0.2, " mm")
         self.det_px_y = self._double_spin(0.0001, 100.0, 0.2, " mm")
+        self.use_background_correction = QCheckBox("使用背景矫正")
+        self.use_background_correction.setChecked(True)
         self.use_dark_flat = QCheckBox("使用 dark/flat")
         self.use_dark_flat.setChecked(True)
+        self.correction_formula = QComboBox()
+        self.correction_formula.setEnabled(False)
+        self.use_background_correction.stateChanged.connect(self.update_correction_formula)
+        self.use_dark_flat.stateChanged.connect(self.update_correction_formula)
+        self.update_correction_formula()
         form.addRow("算法", self.algorithm)
         form.addRow("源物距 SOD", self.sod)
         form.addRow("源探距 SDD", self.sdd)
         form.addRow("投影数量", self.proj_count)
         form.addRow("探测器横向像素间隔", self.det_px_x)
         form.addRow("探测器纵向像素间隔", self.det_px_y)
+        form.addRow("校正公式", self.correction_formula)
+        form.addRow("", self.use_background_correction)
         form.addRow("", self.use_dark_flat)
         return group
+
+    def update_correction_formula(self, _state: int | None = None) -> None:
+        """根据当前校正选项刷新公式展示。"""
+        use_background = self.use_background_correction.isChecked()
+        use_dark_flat = self.use_dark_flat.isChecked()
+        if use_background and use_dark_flat:
+            formula = "μ = -ln((max(I - B, 0) - D) / (F - D))"
+        elif use_background:
+            formula = "μ = -ln(max(I - B, 0))"
+        elif use_dark_flat:
+            formula = "μ = -ln((I - D) / (F - D))"
+        else:
+            formula = "μ = -ln(I)"
+
+        self.correction_formula.clear()
+        self.correction_formula.addItem(formula)
 
     def _build_correction_group(self) -> QGroupBox:
         group = QGroupBox("几何校正")
@@ -234,10 +298,15 @@ class MainWindow(QMainWindow):
         self.det_offset_x = self._double_spin(-10000.0, 10000.0, 0.0, " mm")
         self.det_offset_y = self._double_spin(-10000.0, 10000.0, 0.0, " mm")
         self.center_offset = self._double_spin(-10000.0, 10000.0, 0.0, " px")
+        self.center_offset.valueChanged.connect(lambda _value: self.update_display_index(self.slice_slider.value()))
+        self.show_rotation_center = QCheckBox("显示旋转中心")
+        self.show_rotation_center.setChecked(True)
+        self.show_rotation_center.stateChanged.connect(lambda _state: self.update_display_index(self.slice_slider.value()))
         form.addRow("探测器面内偏转", self.det_roll)
         form.addRow("探测器横向偏移", self.det_offset_x)
         form.addRow("探测器纵向偏移", self.det_offset_y)
         form.addRow("旋转中心偏移", self.center_offset)
+        form.addRow("", self.show_rotation_center)
         return group
 
     def _build_volume_group(self) -> QGroupBox:
@@ -280,12 +349,9 @@ class MainWindow(QMainWindow):
         box.setValue(value)
         return box
 
-    def _load_default_folder(self) -> None:
-        if Path(self.projection_dir.text()).exists():
-            self.load_projection_preview()
-
     def choose_projection_dir(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "选择投影图像目录", self.projection_dir.text())
+        start_dir = self.projection_dir.text().strip() or str(Path.cwd() / "proj")
+        folder = QFileDialog.getExistingDirectory(self, "选择投影图像目录", start_dir)
         if folder:
             self.projection_dir.setText(folder)
             self.load_projection_preview()
@@ -294,11 +360,19 @@ class MainWindow(QMainWindow):
         try:
             self.projections, files = load_projection_stack(self.projection_dir.text(), limit=self.proj_count.value())
         except Exception as exc:
+            self.projections = None
+            self.volume = None
+            self.slice_slider.setEnabled(False)
+            self.reconstruct_button.setEnabled(False)
+            self.image_view.clear("导入失败，请重新选择投影目录")
+            self.slice_label.setText("切片/投影：0")
             QMessageBox.warning(self, "加载失败", str(exc))
             return
         self.log(f"已加载投影预览：{len(files)} 张，尺寸 {self.projections.shape[2]} x {self.projections.shape[1]}")
         self.volume = None
         self.slice_slider.setRange(0, max(0, len(files) - 1))
+        self.slice_slider.setEnabled(True)
+        self.reconstruct_button.setEnabled(True)
         self.slice_slider.setValue(0)
         self.update_display_index(0)
 
@@ -308,7 +382,10 @@ class MainWindow(QMainWindow):
             self.image_view.set_array(self.volume[index])
         elif self.projections is not None:
             self.slice_label.setText(f"投影：{index + 1}/{self.projections.shape[0]}")
-            self.image_view.set_array(self.projections[index])
+            center_x = None
+            if self.show_rotation_center.isChecked():
+                center_x = (self.projections.shape[2] - 1) / 2.0 + self.center_offset.value()
+            self.image_view.set_array(self.projections[index], center_x=center_x)
 
     def make_config(self) -> ReconstructionConfig:
         """
@@ -334,6 +411,7 @@ class MainWindow(QMainWindow):
             volume_size_y=self.vol_y.value(),
             volume_size_z=self.vol_z.value(),
             voxel_size_mm=self.voxel.value(),
+            use_background_correction=self.use_background_correction.isChecked(),
             use_dark_flat=self.use_dark_flat.isChecked(),
         )
 
@@ -404,79 +482,15 @@ class MainWindow(QMainWindow):
         self.log_box.append(message)
 
 
-def _build_cli_parser() -> argparse.ArgumentParser:
-    """构建命令行参数解析器。"""
-    parser = argparse.ArgumentParser(description="Tiny CT workstation")
-    parser.add_argument("--projection-dir", default=str(Path.cwd() / "proj"), help="投影图像目录")
-    parser.add_argument("--output-dir", default=str(Path.cwd() / "recon_result"), help="重建输出目录")
-    parser.add_argument("--projection-count", type=int, default=360, help="读取投影的数量上限")
-    parser.add_argument("--sod", type=float, default=200.0, help="源物距（mm）")
-    parser.add_argument("--sdd", type=float, default=800.0, help="源探距（mm）")
-    parser.add_argument("--detector-pixel-size-x", type=float, default=0.2, help="探测器横向像素间隔（mm）")
-    parser.add_argument("--detector-pixel-size-y", type=float, default=0.2, help="探测器纵向像素间隔（mm）")
-    parser.add_argument("--detector-roll", type=float, default=2.0, help="探测器面内偏转（deg）")
-    parser.add_argument("--detector-offset-x", type=float, default=0.0, help="探测器横向偏移（mm）")
-    parser.add_argument("--detector-offset-y", type=float, default=0.0, help="探测器纵向偏移（mm）")
-    parser.add_argument("--rotation-center-offset", type=float, default=0.0, help="旋转中心偏移（px）")
-    parser.add_argument("--vol-size-x", type=int, default=256, help="重建体数据 X 尺寸")
-    parser.add_argument("--vol-size-y", type=int, default=256, help="重建体数据 Y 尺寸")
-    parser.add_argument("--vol-size-z", type=int, default=256, help="重建体数据 Z 尺寸")
-    parser.add_argument("--voxel-size", type=float, default=0.2, help="体素尺寸（mm）")
-    parser.add_argument("--no-dark-flat", action="store_true", help="关闭 dark/flat 校正")
-    parser.add_argument("--no-png", action="store_true", help="不导出 PNG 切片")
-    parser.add_argument("--gui", action="store_true", help="强制启动 GUI 模式")
-    return parser
-
-
-def cli_main(argv: list[str] | None = None) -> int:
-    """运行命令行重建模式。"""
-    parser = _build_cli_parser()
-    args = parser.parse_args(argv)
-    config = ReconstructionConfig(
-        projection_dir=args.projection_dir,
-        output_dir=args.output_dir,
-        projection_count=args.projection_count,
-        source_object_distance_mm=args.sod,
-        source_detector_distance_mm=args.sdd,
-        detector_pixel_size_x_mm=args.detector_pixel_size_x,
-        detector_pixel_size_y_mm=args.detector_pixel_size_y,
-        detector_roll_deg=args.detector_roll,
-        detector_offset_x_mm=args.detector_offset_x,
-        detector_offset_y_mm=args.detector_offset_y,
-        rotation_center_offset_px=args.rotation_center_offset,
-        volume_size_x=args.vol_size_x,
-        volume_size_y=args.vol_size_y,
-        volume_size_z=args.vol_size_z,
-        voxel_size_mm=args.voxel_size,
-        use_dark_flat=not args.no_dark_flat,
-        save_png_slices=not args.no_png,
-    )
-
-    try:
-        volume = run_fdk_reconstruction(config, lambda message: print(f"[tiny-ct] {message}"))
-    except Exception as exc:
-        print(f"重建失败：{exc}", file=sys.stderr)
-        return 1
-
-    print(f"重建完成: shape={volume.shape}, output_dir={config.output_dir}")
-    return 0
-
-
-def main(argv: list[str] | None = None) -> int:
+def main() -> int:
     """
     应用程序入口点。
 
-    若命令行带参数，优先执行 CLI 重建；否则启动 GUI。
+    启动 GUI。
 
     Returns:
         int: 应用程序退出代码。
     """
-    if argv is None:
-        argv = sys.argv[1:]
-
-    if argv and not ("--gui" in argv or "gui" in argv):
-        return cli_main(argv)
-
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()

@@ -20,7 +20,7 @@ class ReconstructionConfig:
     探测器参数、体数据大小等。所有距离单位为毫米，角度单位为度。
     """
     # 文件和输出路径
-    projection_dir: str = "proj"  # 投影图像目录路径
+    projection_dir: str = ""  # 投影图像目录路径，导入前为空
     output_dir: str = "recon_result"  # 重建结果输出目录
 
     # 重建算法
@@ -48,6 +48,7 @@ class ReconstructionConfig:
     voxel_size_mm: float = 0.2  # 体素大小（mm）
 
     # 处理选项
+    use_background_correction: bool = True  # 是否使用背景图像校正
     use_dark_flat: bool = True  # 是否使用暗场/亮场校正
     save_png_slices: bool = True  # 是否导出PNG切片
 
@@ -80,6 +81,8 @@ class ReconstructionConfig:
             raise ValueError("体数据尺寸必须全部大于 0。")
         if self.voxel_size_mm <= 0:
             raise ValueError("体素尺寸必须大于 0。")
+        if not self.projection_dir.strip():
+            raise ValueError("请先导入投影图像目录。")
 
     def save(self, path: str | Path) -> None:
         """

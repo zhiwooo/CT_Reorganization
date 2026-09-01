@@ -13,7 +13,7 @@ from typing import Callable
 import numpy as np
 
 from .config import ReconstructionConfig
-from .io_utils import load_optional_calibration, load_projection_stack, save_png_stack
+from .io_utils import load_optional_background, load_optional_calibration, load_projection_stack, save_png_stack
 
 
 # 进度回调函数类型定义
@@ -141,6 +141,21 @@ def _apply_detector_roll(projections: np.ndarray, roll_deg: float, callback: Pro
     return np.stack(corrected, axis=0).astype(np.float32)
 
 
+def _apply_background_correction(
+    projections: np.ndarray,
+    background: np.ndarray,
+    callback: ProgressCallback | None,
+) -> np.ndarray:
+    """Subtract a static detector/background image from every projection."""
+    if background.shape != projections.shape[1:]:
+        _log(callback, f"背景图尺寸 {background.shape} 与投影尺寸 {projections.shape[1:]} 不一致，已跳过背景矫正。")
+        return projections
+
+    _log(callback, "应用背景矫正。")
+    corrected = projections - background.astype(np.float32, copy=False)
+    return np.maximum(corrected, 0.0).astype(np.float32, copy=False)
+
+
 def preprocess_projections(
     projections: np.ndarray,
     folder: str | Path,
@@ -167,6 +182,13 @@ def preprocess_projections(
         - 异常值（NaN、Inf）会被替换为0
     """
     data = projections.astype(np.float32, copy=True)
+
+    if config.use_background_correction:
+        background = load_optional_background(folder)
+        if background is not None:
+            data = _apply_background_correction(data, background, callback)
+        else:
+            _log(callback, "未找到 background/bg/bkg 图像，跳过背景矫正。")
 
     if config.use_dark_flat:
         dark, flat = load_optional_calibration(folder)

@@ -16,9 +16,27 @@ import tifffile
 
 # 支持的投影图像文件名模式
 IMAGE_PATTERNS = ("proj_*.tif", "proj_*.tiff", "proj_*.png", "proj_*.jpg", "proj_*.jpeg")
+BACKGROUND_PATTERNS = (
+    "background_*.tif",
+    "background_*.tiff",
+    "background_*.png",
+    "background_*.jpg",
+    "background_*.jpeg",
+    "bg_*.tif",
+    "bg_*.tiff",
+    "bg_*.png",
+    "bg_*.jpg",
+    "bg_*.jpeg",
+    "bkg_*.tif",
+    "bkg_*.tiff",
+    "bkg_*.png",
+    "bkg_*.jpg",
+    "bkg_*.jpeg",
+)
 DARK_PATTERNS = ("dark_*.tif", "dark_*.tiff", "dark_*.png", "dark_*.jpg", "dark_*.jpeg")
 FLAT_PATTERNS = ("flat_*.tif", "flat_*.tiff", "flat_*.png", "flat_*.jpg", "flat_*.jpeg")
 ALL_IMAGE_PATTERNS = ("*.tif", "*.tiff", "*.png", "*.jpg", "*.jpeg")
+CALIBRATION_PREFIXES = ("background_", "bg_", "bkg_", "dark_", "flat_")
 
 
 def find_projection_files(folder: str | Path) -> list[Path]:
@@ -34,7 +52,13 @@ def find_projection_files(folder: str | Path) -> list[Path]:
     Returns:
         list[Path]: 找到的投影文件路径列表（按名称排序）。
     """
+    if not str(folder).strip():
+        return []
+
     base = Path(folder)
+    if not base.is_dir():
+        return []
+
     files: list[Path] = []
     for pattern in IMAGE_PATTERNS:
         files.extend(sorted(base.glob(pattern)))
@@ -43,7 +67,7 @@ def find_projection_files(folder: str | Path) -> list[Path]:
             files.extend(
                 path
                 for path in sorted(base.glob(pattern))
-                if not path.name.lower().startswith(("dark_", "flat_"))
+                if not path.name.lower().startswith(CALIBRATION_PREFIXES)
             )
     return files
 
@@ -104,6 +128,19 @@ def load_projection_stack(folder: str | Path, limit: int | None = None) -> tuple
         raise FileNotFoundError(f"No projection images found in {folder}")
     stack = np.stack([read_image(path) for path in files], axis=0)
     return stack, files
+
+
+def load_optional_background(folder: str | Path) -> np.ndarray | None:
+    """
+    加载可选背景校正图像。
+
+    按 background_*、bg_*、bkg_* 命名查找，返回第一个匹配图像。
+    """
+    base = Path(folder)
+    background_files: list[Path] = []
+    for pattern in BACKGROUND_PATTERNS:
+        background_files.extend(sorted(base.glob(pattern)))
+    return read_image(background_files[0]) if background_files else None
 
 
 def load_optional_calibration(folder: str | Path) -> tuple[np.ndarray | None, np.ndarray | None]:
