@@ -35,8 +35,8 @@ class ReconstructionConfig:
     detector_pixel_size_x_mm: float = 0.2  # 探测器横向像素间隔（mm）
     detector_pixel_size_y_mm: float = 0.2  # 探测器纵向像素间隔（mm）
     detector_roll_deg: float = 2.0  # 探测器面内偏转角度（度）
-    detector_offset_x_mm: float = 0.0  # 探测器横向偏移（mm）
-    detector_offset_y_mm: float = 0.0  # 探测器纵向偏移（mm）
+    detector_offset_x_mm: float = 0.2  # 探测器横向偏移（mm）
+    detector_offset_y_mm: float = 0.2  # 探测器纵向偏移（mm）
 
     # 旋转中心校正
     rotation_center_offset_px: float = 0.0  # 旋转中心偏移（像素）

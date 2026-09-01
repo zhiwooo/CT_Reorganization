@@ -28,5 +28,5 @@ Tiny CT Workstation - 轻量级工业CT重建工作站。
 """
 
 __version__ = "0.1.0"
-__author__ = "CT Reconstruction Team"
+__author__ = "UJS"
 __description__ = "Lightweight Industrial CT Reconstruction Workstation"

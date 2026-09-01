@@ -67,6 +67,7 @@ def find_projection_files(folder: str | Path) -> list[Path]:
             files.extend(
                 path
                 for path in sorted(base.glob(pattern))
+                # 排除可能的校正图像文件
                 if not path.name.lower().startswith(CALIBRATION_PREFIXES)
             )
     return files
@@ -126,6 +127,7 @@ def load_projection_stack(folder: str | Path, limit: int | None = None) -> tuple
         files = files[:limit]
     if not files:
         raise FileNotFoundError(f"No projection images found in {folder}")
+    # 使用列表推导式加载图像并堆叠为三维数组
     stack = np.stack([read_image(path) for path in files], axis=0)
     return stack, files
 
@@ -183,10 +185,13 @@ def normalize_for_display(image: np.ndarray) -> np.ndarray:
         np.ndarray: uint8类型的显示图像，值范围[0, 255]。
     """
     array = np.asarray(image, dtype=np.float32)
+    # 计算1%和99%的百分位数，避免极端噪声影响
     lo, hi = np.percentile(array, [1.0, 99.0])
     if hi <= lo:
+        # 如果百分位数计算失败（图像太单调），改用最小/最大值
         lo, hi = float(np.min(array)), float(np.max(array))
     if hi <= lo:
+        # 如果图像完全单色，返回全黑图像
         return np.zeros(array.shape, dtype=np.uint8)
     scaled = np.clip((array - lo) / (hi - lo), 0.0, 1.0)
     return (scaled * 255).astype(np.uint8)
