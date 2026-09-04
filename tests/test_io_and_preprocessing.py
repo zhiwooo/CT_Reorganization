@@ -147,10 +147,16 @@ def test_main_window_starts_with_empty_projection_path() -> None:
     assert app is not None
     assert window.projection_dir.text() == ""
     assert window.center_offset.value() == 0.0
-    assert window.voxel.value() == 0.05
-    assert window.vol_x.value() == 512
-    assert window.vol_y.value() == 512
-    assert window.vol_z.value() == 512
+    assert window.sod.value() == 0.0
+    assert window.sdd.value() == 0.0
+    assert window.proj_count.value() == 0
+    assert window.det_px_x.value() == 0.0
+    assert window.det_px_y.value() == 0.0
+    assert window.det_roll.value() == 0.0
+    assert window.voxel.value() == 0.0
+    assert window.vol_x.value() == 0
+    assert window.vol_y.value() == 0
+    assert window.vol_z.value() == 0
     assert window.correction_formula.currentText() == "μ = -ln((max(I - B, 0) - D) / (F - D))"
     assert window.projections is None
     assert window.volume is None
@@ -158,6 +164,30 @@ def test_main_window_starts_with_empty_projection_path() -> None:
     assert not window.reconstruct_button.isEnabled()
     assert not window.estimate_center_button.isEnabled()
     assert not window.calc_voxel_button.isEnabled()
+
+
+def test_main_window_sets_projection_count_from_imported_files(tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from tiny_ct_app.main import MainWindow
+
+    _write_image(tmp_path / "proj_0000.tif", 10)
+    _write_image(tmp_path / "proj_0001.tif", 11)
+    _write_image(tmp_path / "proj_0002.tif", 12)
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    window = MainWindow()
+    window.projection_dir.setText(str(tmp_path))
+
+    window.load_projection_preview()
+
+    assert app is not None
+    assert window.proj_count.value() == 3
+    assert window.vol_x.value() == 5
+    assert window.vol_y.value() == 5
+    assert window.vol_z.value() == 4
+    assert window.voxel.value() == 0.0
 
 
 def test_main_window_calculates_voxel_size_from_magnification() -> None:
@@ -169,6 +199,7 @@ def test_main_window_calculates_voxel_size_from_magnification() -> None:
     app = QApplication.instance() or QApplication(sys.argv)
     window = MainWindow()
     window.det_px_x.setValue(0.2)
+    window.det_px_y.setValue(0.2)
     window.sod.setValue(200.0)
     window.sdd.setValue(800.0)
     window.projections = np.zeros((2, 512, 512), dtype=np.float32)

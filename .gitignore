@@ -9,5 +9,6 @@ recon_*/
 recon_smoke/
 build/
 dist/
+proj*/
 release/
 *.spec

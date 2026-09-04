@@ -27,14 +27,14 @@ class ReconstructionConfig:
     algorithm: str = "FDK"  # 重建算法（目前仅支持FDK）
 
     # 几何参数（单位：毫米）
-    source_object_distance_mm: float = 200.0  # 源物距(SOD): X射线源到旋转中心的距离
-    source_detector_distance_mm: float = 800.0  # 源探距(SDD): X射线源到探测器的距离
-    projection_count: int = 360  # 投影总数量
+    source_object_distance_mm: float = 0.0  # 源物距(SOD): X射线源到旋转中心的距离
+    source_detector_distance_mm: float = 0.0  # 源探距(SDD): X射线源到探测器的距离
+    projection_count: int = 0  # 投影总数量，由导入图像数量决定
 
     # 探测器参数
-    detector_pixel_size_x_mm: float = 0.2  # 探测器横向像素间隔（mm）
-    detector_pixel_size_y_mm: float = 0.2  # 探测器纵向像素间隔（mm）
-    detector_roll_deg: float = 2.0  # 探测器面内偏转角度（度）
+    detector_pixel_size_x_mm: float = 0.0  # 探测器横向像素间隔（mm）
+    detector_pixel_size_y_mm: float = 0.0  # 探测器纵向像素间隔（mm）
+    detector_roll_deg: float = 0.0  # 探测器面内偏转角度（度）
     detector_offset_x_mm: float = 0.2  # 探测器横向偏移（mm）
     detector_offset_y_mm: float = 0.2  # 探测器纵向偏移（mm）
 
@@ -42,10 +42,10 @@ class ReconstructionConfig:
     rotation_center_offset_px: float = 0.0  # 旋转中心偏移（像素）
 
     # 体数据参数
-    volume_size_x: int = 512  # 体数据X方向大小（像素）
-    volume_size_y: int = 512  # 体数据Y方向大小（像素）
-    volume_size_z: int = 512  # 体数据Z方向大小（像素）
-    voxel_size_mm: float = 0.05  # 体素大小（mm）
+    volume_size_x: int = 0  # 体数据X方向大小（像素）
+    volume_size_y: int = 0  # 体数据Y方向大小（像素）
+    volume_size_z: int = 0  # 体数据Z方向大小（像素）
+    voxel_size_mm: float = 0.0  # 体素大小（mm）
 
     # 处理选项
     use_background_correction: bool = True  # 是否使用背景图像校正

@@ -251,11 +251,12 @@ class MainWindow(QMainWindow):
         form = QFormLayout(group)
         self.algorithm = QComboBox()
         self.algorithm.addItems(["FDK"])
-        self.sod = self._double_spin(1.0, 100000.0, 200.0, " mm")
-        self.sdd = self._double_spin(1.0, 100000.0, 800.0, " mm")
-        self.proj_count = self._spin(1, 20000, 360)
-        self.det_px_x = self._double_spin(0.0001, 100.0, 0.2, " mm")
-        self.det_px_y = self._double_spin(0.0001, 100.0, 0.2, " mm")
+        self.sod = self._double_spin(0.0, 100000.0, 0.0, " mm")
+        self.sdd = self._double_spin(0.0, 100000.0, 0.0, " mm")
+        self.proj_count = self._spin(0, 20000, 0)
+        self.proj_count.setEnabled(False)
+        self.det_px_x = self._double_spin(0.0, 100.0, 0.0, " mm")
+        self.det_px_y = self._double_spin(0.0, 100.0, 0.0, " mm")
         self.center_offset = self._double_spin(-10000.0, 10000.0, 0.0, " px")
         self.center_offset.valueChanged.connect(lambda _value: self.update_display_index(self.slice_slider.value()))
         center_row = QHBoxLayout()
@@ -312,7 +313,7 @@ class MainWindow(QMainWindow):
     def _build_correction_group(self) -> QGroupBox:
         group = QGroupBox("几何校正")
         form = QFormLayout(group)
-        self.det_roll = self._double_spin(-45.0, 45.0, 2.0, " deg")
+        self.det_roll = self._double_spin(-45.0, 45.0, 0.0, " deg")
         self.det_offset_x = self._double_spin(-10000.0, 10000.0, 0.0, " mm")
         self.det_offset_y = self._double_spin(-10000.0, 10000.0, 0.0, " mm")
         form.addRow("探测器面内偏转", self.det_roll)
@@ -323,10 +324,10 @@ class MainWindow(QMainWindow):
     def _build_volume_group(self) -> QGroupBox:
         group = QGroupBox("体数据设置")
         form = QFormLayout(group)
-        self.vol_x = self._spin(16, 2048, 512)
-        self.vol_y = self._spin(16, 2048, 512)
-        self.vol_z = self._spin(16, 2048, 512)
-        self.voxel = self._double_spin(0.0001, 100.0, 0.05, " mm", decimals=6)
+        self.vol_x = self._spin(0, 2048, 0)
+        self.vol_y = self._spin(0, 2048, 0)
+        self.vol_z = self._spin(0, 2048, 0)
+        self.voxel = self._double_spin(0.0, 100.0, 0.0, " mm", decimals=6)
         voxel_row = QHBoxLayout()
         voxel_row.addWidget(self.voxel, 1)
         self.calc_voxel_button = QPushButton("计算体素尺寸")
@@ -398,6 +399,11 @@ class MainWindow(QMainWindow):
             self.output_dir.setText(folder)
 
     def _recommended_sampling(self) -> tuple[float, int, int, int]:
+        if self.sdd.value() <= self.sod.value() or self.sod.value() <= 0:
+            raise ValueError("请先输入有效的 SOD 和 SDD，且 SDD 必须大于 SOD。")
+        if self.det_px_x.value() <= 0 or self.det_px_y.value() <= 0:
+            raise ValueError("请先输入有效的探测器像素间隔。")
+
         voxel_size = self.det_px_x.value() * self.sod.value() / self.sdd.value()
         if self.projections is None:
             return voxel_size, self.vol_x.value(), self.vol_y.value(), self.vol_z.value()
@@ -424,7 +430,10 @@ class MainWindow(QMainWindow):
             )
 
     def calculate_voxel_size(self) -> None:
-        self.apply_recommended_sampling(log=True)
+        try:
+            self.apply_recommended_sampling(log=True)
+        except Exception as exc:
+            QMessageBox.warning(self, "计算失败", str(exc))
 
     def estimate_rotation_center(self) -> None:
         if self.projections is None:
@@ -448,10 +457,15 @@ class MainWindow(QMainWindow):
 
     def load_projection_preview(self) -> None:
         try:
-            self.projections, files = load_projection_stack(self.projection_dir.text(), limit=self.proj_count.value())
+            self.projections, files = load_projection_stack(self.projection_dir.text())
         except Exception as exc:
             self.projections = None
             self.volume = None
+            self.proj_count.setValue(0)
+            self.vol_x.setValue(0)
+            self.vol_y.setValue(0)
+            self.vol_z.setValue(0)
+            self.voxel.setValue(0.0)
             self.update_data_dependent_controls()
             self.image_view.clear("导入失败，请重新选择投影目录")
             self.slice_label.setText("切片/投影：0")
@@ -459,9 +473,16 @@ class MainWindow(QMainWindow):
             return
         self.log(f"已加载投影预览：{len(files)} 张，尺寸 {self.projections.shape[2]} x {self.projections.shape[1]}")
         self.volume = None
+        self.proj_count.setValue(len(files))
+        self.vol_x.setValue(self.projections.shape[2])
+        self.vol_y.setValue(self.projections.shape[2])
+        self.vol_z.setValue(self.projections.shape[1])
         self.slice_slider.setRange(0, max(0, len(files) - 1))
         self.update_data_dependent_controls()
-        self.apply_recommended_sampling(log=False)
+        try:
+            self.apply_recommended_sampling(log=False)
+        except ValueError:
+            pass
         self.slice_slider.setValue(0)
         self.update_display_index(0)
 
